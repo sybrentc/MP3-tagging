@@ -51,17 +51,28 @@ def analyze_mp3(file_path):
     print(f"Duration: {audiofile.info.time_secs:.2f} seconds")
     print(f"Bit Rate: ~{audiofile.info.bit_rate[1] // 1000} kb/s")
 
+def analyze_directory(directory_path):
+    if not os.path.exists(directory_path):
+        print(f"Error: Directory {directory_path} does not exist")
+        return
+    for root, _, files in os.walk(directory_path):
+        for file in files:
+            if file.lower().endswith('.mp3'):
+                analyze_mp3(os.path.join(root, file))
+
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python analyze_id3.py <mp3_file_path>")
+        print("Usage: python analyze_id3.py <mp3_file_path_or_directory>")
         sys.exit(1)
     
-    file_path = sys.argv[1]
-    if not os.path.isfile(file_path):
-        print(f"Error: {file_path} is not a valid file")
+    path = sys.argv[1]
+    if os.path.isfile(path):
+        analyze_mp3(path)
+    elif os.path.isdir(path):
+        analyze_directory(path)
+    else:
+        print(f"Error: {path} is not a valid file or directory")
         sys.exit(1)
-
-    analyze_mp3(file_path)
 
 if __name__ == "__main__":
     main() 
