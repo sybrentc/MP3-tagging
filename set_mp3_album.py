@@ -28,13 +28,13 @@ def set_album_for_mp3s(directory_path: str, album_name: str):
                 continue
             
             if audiofile.tag is None:
-                audiofile.initTag(version=eyed3.id3.ID3_V2_3)
+                audiofile.initTag(version=eyed3.id3.ID3_V2_4)
                 if audiofile.tag is None:
                     print(f"Warning: Could not initialize or load tag for: {file_path}")
                     continue
             
             audiofile.tag.album = album_name
-            audiofile.tag.save(version=eyed3.id3.ID3_V2_3, encoding='utf-8')
+            audiofile.tag.save(version=eyed3.id3.ID3_V2_4, encoding='utf-8')
             print(f"Updated album for '{file_path.name}' to '{album_name}'")
             mp3_files_updated += 1
 
