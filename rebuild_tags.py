@@ -4,12 +4,28 @@ import subprocess
 import tempfile
 import shutil
 import json
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 # Centralized, case-insensitive blacklist of metadata keys from ffprobe's output.
 # These are the tags we want to check for and remove.
 BLACKLISTED_TAG_KEYS = {'itunsmpb', 'itunnorm', 'itunpgap', 'itunes_cddb_1', 'itunes_cddb_tracknumber'}
 
-def check_for_offending_tags(file_path):
+def process_file(file_path, root_folder):
+    """
+    This is the main worker function that will be run in parallel.
+    It takes a single file path, checks it, and sanitises it if needed.
+    """
+    # Print a relative path for cleaner output
+    relative_path = os.path.relpath(file_path, root_folder)
+    print(f"Processing: {relative_path}")
+
+    if check_for_offending_tags(file_path, relative_path):
+        sanitise_file(file_path, relative_path)
+    else:
+        print(f"  - File is clean. Skipping {relative_path}.")
+
+def check_for_offending_tags(file_path, relative_path):
     """
     Uses ffprobe to quickly check if an MP3 file contains any of the
     blacklisted metadata tags.
@@ -23,21 +39,21 @@ def check_for_offending_tags(file_path):
         if 'tags' in data.get('format', {}):
             for key in data['format']['tags']:
                 if key.lower() in BLACKLISTED_TAG_KEYS:
-                    print(f"  - Found offending tag: '{key}'. File needs sanitisation.")
+                    print(f"  - Found offending tag '{key}' in {relative_path}. Needs sanitisation.")
                     return True
         # If we get here, no offending tags were found
         return False
     except Exception as e:
-        print(f"  - Warning: Could not probe file {os.path.basename(file_path)} for tags: {e}")
+        print(f"  - Warning: Could not probe {relative_path} for tags: {e}")
         # Assume it's clean if we can't probe it, to be safe.
         return False
 
-def sanitise_file(original_path):
+def sanitise_file(original_path, relative_path):
     """
     Sanitises a single MP3 file by re-encoding it to strip all embedded data,
     then reapplying a clean, filtered set of metadata.
     """
-    print(f"  - Sanitising {os.path.basename(original_path)}...")
+    print(f"  - Sanitising {relative_path}...")
 
     # 1. Extract all metadata with ffprobe
     metadata_args = []
@@ -51,9 +67,9 @@ def sanitise_file(original_path):
             for key, value in data['format']['tags'].items():
                 if key.lower() not in BLACKLISTED_TAG_KEYS:
                     metadata_args.extend(['-metadata', f'{key}={value}'])
-            print(f"    - Preserving {len(metadata_args) // 2} metadata tags.")
+            print(f"    - Preserving {len(metadata_args) // 2} metadata tags for {relative_path}.")
     except Exception as e:
-        print(f"    - Warning: Could not extract metadata for {os.path.basename(original_path)}: {e}")
+        print(f"    - Warning: Could not extract metadata for {relative_path}: {e}")
         # We can still proceed to strip the file, it will just have no metadata.
 
     # 2. Re-encode the file using ffmpeg, applying the filtered metadata
@@ -73,7 +89,7 @@ def sanitise_file(original_path):
         subprocess.run(command, check=True, capture_output=True, text=True)
         
         shutil.move(temp_path, original_path)
-        print(f"    - Successfully sanitised {os.path.basename(original_path)}.")
+        print(f"    - Successfully sanitised {relative_path}.")
         return True
 
     except subprocess.CalledProcessError as e:
@@ -86,36 +102,55 @@ def sanitise_file(original_path):
         os.remove(temp_path)
     return False
 
-def process_directory(folder_path):
+def main():
     """
-    Recursively scans a directory for MP3 files, checks for offending tags,
-    and sanitises them only if needed.
+    Main function to set up argument parsing, find files, and
+    kick off the parallel processing.
     """
+    parser = argparse.ArgumentParser(
+        description='Conditionally and in parallel rebuilds MP3s using ffmpeg if they contain blacklisted tags.'
+    )
+    parser.add_argument('folder_path', type=str, help='The folder of MP3s to process.')
+    args = parser.parse_args()
+
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
         print("Error: This script requires both 'ffmpeg' and 'ffprobe'.")
         print("Please install them and ensure they are in your PATH.")
         return
 
-    for root, _, files in os.walk(folder_path):
-        for filename in sorted(files):
-            if not filename.lower().endswith('.mp3'):
-                continue
+    if not os.path.isdir(args.folder_path):
+        print(f"Error: Directory not found at '{args.folder_path}'")
+        return
 
-            file_path = os.path.join(root, filename)
-            print(f"Processing: {filename}")
+    # 1. Find all MP3 files first
+    mp3_files = []
+    for root, _, files in os.walk(args.folder_path):
+        for filename in files:
+            if filename.lower().endswith('.mp3'):
+                mp3_files.append(os.path.join(root, filename))
 
-            if check_for_offending_tags(file_path):
-                sanitise_file(file_path)
-            else:
-                print("  - File is clean. Skipping.")
+    if not mp3_files:
+        print("No MP3 files found in the specified directory.")
+        return
+    
+    print(f"Found {len(mp3_files)} MP3 file(s). Starting parallel processing...")
+
+    # 2. Use a process pool to run the checks and conversions in parallel
+    # We use cpu_count() to automatically use all available cores.
+    num_processes = cpu_count()
+    print(f"Using {num_processes} processes.")
+    
+    # We use partial to "pre-fill" the root_folder argument of process_file,
+    # since the pool iterator only passes a single argument (the file path).
+    worker_func = partial(process_file, root_folder=args.folder_path)
+    
+    with Pool(processes=num_processes) as pool:
+        # map will distribute the mp3_files list among the worker processes
+        # and block until all are complete.
+        pool.map(worker_func, sorted(mp3_files))
+        
+    print("\nProcessing complete.")
+
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Conditionally rebuilds MP3 files using ffmpeg if they contain blacklisted tags.'
-    )
-    parser.add_argument('folder_path', type=str, help='The folder of MP3s to process.')
-    args = parser.parse_args()
-    if os.path.isdir(args.folder_path):
-        process_directory(args.folder_path)
-    else:
-        print(f"Error: Directory not found at '{args.folder_path}'") 
+    main() 
