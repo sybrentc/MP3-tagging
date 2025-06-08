@@ -2,6 +2,11 @@ import os
 import sys
 import subprocess
 
+# Determine the absolute path to the eyeD3 executable in the virtual environment
+# This makes the script runnable without activating the venv first.
+script_dir = os.path.dirname(os.path.abspath(__file__))
+eyed3_executable = os.path.join(script_dir, 'venv', 'bin', 'eyeD3')
+
 def set_album_art(mp3_path, art_path):
     if not os.path.exists(mp3_path):
         print(f"Error: MP3 file {mp3_path} does not exist")
@@ -14,7 +19,7 @@ def set_album_art(mp3_path, art_path):
     try:
         # Step 1: Remove all existing images using eyeD3 CLI
         print(f"Attempting to remove all images from: {mp3_path}")
-        remove_command = ["eyeD3", "--remove-all-images", mp3_path]
+        remove_command = [eyed3_executable, "--remove-all-images", mp3_path]
         remove_result = subprocess.run(remove_command, capture_output=True, text=True, check=False)
 
         if remove_result.returncode == 0:
@@ -22,7 +27,7 @@ def set_album_art(mp3_path, art_path):
         else:
             # eyeD3 might return non-0 if no images were found, which is not an error for our purpose.
             # We'll print the output for debugging but proceed.
-            print(f"eyeD3 --remove-all-images for {mp3_path} finished with code {remove_result.returncode}.")
+            print(f"{eyed3_executable} --remove-all-images for {mp3_path} finished with code {remove_result.returncode}.")
             if remove_result.stdout:
                 print(f"  stdout: {remove_result.stdout.strip()}")
             if remove_result.stderr:
@@ -34,14 +39,14 @@ def set_album_art(mp3_path, art_path):
         print(f"Attempting to add image {art_path} to: {mp3_path}")
         # Ensure art_path is absolute for the command, or accessible from CWD
         # If art_path is just 'cool.jpg', it assumes it's in the CWD where eyeD3 runs.
-        add_command = ["eyeD3", "--add-image", f"{art_path}:FRONT_COVER", mp3_path]
+        add_command = [eyed3_executable, "--add-image", f"{art_path}:FRONT_COVER", mp3_path]
         add_result = subprocess.run(add_command, capture_output=True, text=True, check=False)
 
         if add_result.returncode == 0:
             print(f"Successfully set album art for {mp3_path} using {art_path}")
             return True
         else:
-            print(f"Error setting album art for {mp3_path} using eyeD3 --add-image.")
+            print(f"Error setting album art for {mp3_path} using {eyed3_executable} --add-image.")
             print(f"  Return Code: {add_result.returncode}")
             if add_result.stdout:
                 print(f"  stdout: {add_result.stdout.strip()}")
