@@ -39,7 +39,7 @@ def set_album_artist(directory, album_artist):
                     audiofile.tag.version = (2, 4, 0)  # Set to ID3 v2.4
                     
                     audiofile.tag.album_artist = album_artist
-                    audiofile.tag.save(version=(2, 4, 0))  # Explicitly save as v2.4
+                    audiofile.tag.save(version=(2, 4, 0), encoding='utf-8')  # Explicitly save as v2.4 and utf-8
                     print(f"Updated album artist for '{file}' to '{album_artist}'")
                     mp3_files_updated += 1
                 except Exception as e:
