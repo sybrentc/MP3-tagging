@@ -140,21 +140,24 @@ def get_silence_at_end_info(filepath):
         return None
 
 
-def trim_silence_and_replace(filepath):
-    """Trims silence from the end of the file and replaces the original."""
-    print(f"  Attempting to trim silence from {filepath}...")
+def trim_silence_and_replace(filepath, silence_info):
+    """
+    Trims silence from the end of the file losslessly and replaces the original.
+    'silence_info' is a dictionary containing the 'start' time of the silence.
+    """
+    print(f"  Attempting to losslessly trim silence from {filepath}...")
     temp_filepath = filepath + ".trimmed_temp.mp3"
     
-    # Using -map_metadata 0 to copy all metadata from input to output
-    # Using -id3v2_version 3 to ensure broader compatibility for ID3 tags.
-    # Using -q:a 0 for LAME encoder's highest quality VBR.
+    # The time to cut to is the start of the detected silence.
+    trim_to_time = silence_info['start']
+
+    # We will use ffmpeg to do a lossless cut.
+    # -to specifies the position to stop writing the output.
+    # -c copy tells ffmpeg to copy the stream directly, without re-encoding.
     cmd = [
         "ffmpeg", "-i", filepath,
-        "-af", f"areverse,silenceremove=start_periods=1:start_threshold={SILENCE_THRESHOLD_DB},areverse",
-        "-c:a", "libmp3lame", # Explicitly use libmp3lame
-        "-q:a", "0",
-        "-map_metadata", "0",
-        "-id3v2_version", "3", 
+        "-to", str(trim_to_time),
+        "-c", "copy",
         "-y", # Overwrite temp_filepath if it exists
         temp_filepath
     ]
@@ -169,7 +172,10 @@ def trim_silence_and_replace(filepath):
             except OSError: pass
         return False
 
-    if not os.path.exists(temp_filepath) or os.path.getsize(temp_filepath) == 0:
+    original_size = os.path.getsize(filepath)
+    new_size = os.path.getsize(temp_filepath)
+
+    if not os.path.exists(temp_filepath) or new_size == 0:
         print(f"  ERROR: Trimmed file {temp_filepath} not created or is empty.")
         if stderr: print(f"  ffmpeg stderr during trimming:\n{stderr.strip()}")
         if os.path.exists(temp_filepath):
@@ -177,9 +183,16 @@ def trim_silence_and_replace(filepath):
             except OSError: pass
         return False
 
+    # A simple sanity check: the new file should be smaller.
+    if new_size >= original_size:
+        print(f"  WARNING: Trimmed file size ({new_size} bytes) is not smaller than original ({original_size} bytes). Aborting replacement.")
+        try: os.remove(temp_filepath)
+        except OSError: pass
+        return False
+
     try:
         shutil.move(temp_filepath, filepath)
-        print(f"  Successfully trimmed and replaced {filepath}")
+        print(f"  Successfully trimmed and replaced {filepath}. Size change: {original_size} -> {new_size} bytes.")
         return True
     except Exception as e:
         print(f"  ERROR: Failed to replace {filepath} with {temp_filepath}. Error: {e}")
@@ -217,7 +230,7 @@ def process_music_library(root_dir):
 
                 silence_info = get_silence_at_end_info(filepath)
                 if silence_info:
-                    if trim_silence_and_replace(filepath):
+                    if trim_silence_and_replace(filepath, silence_info):
                         trimmed_files += 1
                     else:
                         error_files += 1 # Count as error if trim fails
